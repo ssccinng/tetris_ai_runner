@@ -136,7 +136,7 @@ struct test_ai
 {
     m_tetris::TetrisEngine<rule_srs::TetrisRule, ai_zzz::TOJ, search_tspin::Search> ai;
     m_tetris::TetrisMap map;
-    std::mt19937 r_next, r_garbage;
+    std::mt19937 r_next, r_garbage, r_shift;
     size_t next_length;
     int const *combo_table;
     int combo_table_max;
@@ -165,6 +165,7 @@ struct test_ai
         ai.ai_config()->param = data.param;
         r_next.seed(std::random_device()());
         r_garbage.seed(r_next());
+        r_shift.seed(r_next());
         next.clear();
         recv_attack.clear();
         send_attack = 0;
@@ -219,6 +220,7 @@ struct test_ai
 
         char current = next.front();
         auto result = ai.run_hold(map, ai.context()->generate(current), hold, true, next.data() + 1, next_length, 20);
+        
         if(result.target == nullptr || result.target->low >= 20)
         {
             dead = true;
@@ -288,59 +290,56 @@ struct test_ai
             attack += get_combo_attack(++combo);
             break;
         case 4:
+            
+            attack += get_combo_attack(++combo) + 4 + b2b;
             b2b = 1;
-            attack += get_combo_attack(++combo) + 4;
             break;
         }
         if (map.count == 0)
         {
-            attack += 6;
+            attack += 10;
         }
         ++total_block;
         total_attack += attack;
         send_attack = attack;
-        while (!recv_attack.empty())
+        int recv_garbage = 0;
+        while (!recv_attack.empty()) { recv_garbage += recv_attack.front(); recv_attack.pop_front(); };
+        if (send_attack > 0)
         {
-            if (send_attack > 0)
+            if (recv_garbage <= send_attack)
             {
-                if (recv_attack.front() <= send_attack)
+                send_attack -= recv_garbage;
+                recv_garbage = 0;
+            }
+            else
+            {
+                recv_garbage -= send_attack;
+                send_attack = 0;
+            }
+        }
+        for (int y = map.height - 1; y >= recv_garbage; --y)
+        {
+            map.row[y] = map.row[y - recv_garbage];
+        }
+        total_receive += recv_garbage;
+        uint32_t row = ai.context()->full() & ~(1 << std::uniform_int_distribution<uint32_t>(0, ai.context()->width() - 1)(r_garbage));
+        for (int i = 0; i < recv_garbage; ++i)
+        {    
+            if (std::uniform_int_distribution<double>(0, 1)(r_garbage) <= 1.0 / 3.0)
+            {
+                row = ai.context()->full() & ~(1 << std::uniform_int_distribution<uint32_t>(0, ai.context()->width() - 1)(r_garbage));
+            }
+            map.row[1] = row;
+        }
+        map.count = 0;
+        for (int my = 0; my < map.height; ++my)
+        {
+            for (int mx = 0; mx < map.width; ++mx)
+            {
+                if (map.full(mx, my))
                 {
-                    send_attack -= recv_attack.front();
-                    recv_attack.pop_front();
-                    continue;
-                }
-                else
-                {
-                    recv_attack.front() -= send_attack;
-                    send_attack = 0;
-                }
-            }
-            if (attack > 0)
-            {
-                break;
-            }
-            int line = recv_attack.front();
-            total_receive += line;
-            recv_attack.pop_front();
-            for (int y = map.height - 1; y >= line; --y)
-            {
-                map.row[y] = map.row[y - line];
-            }
-            uint32_t row = ai.context()->full() & ~(1 << std::uniform_int_distribution<uint32_t>(0, ai.context()->width() - 1)(r_garbage));
-            for (int y = 0; y < line; ++y)
-            {
-                map.row[y] = row;
-            }
-            map.count = 0;
-            for (int my = 0; my < map.height; ++my)
-            {
-                for (int mx = 0; mx < map.width; ++mx)
-                {
-                    if (map.full(mx, my))
-                    {
-                        map.top[mx] = map.roof = my + 1;
-                        ++map.count;
-                    }
+                    map.top[mx] = map.roof = my + 1;
+                    ++map.count;
                 }
             }
         }
@@ -667,8 +666,8 @@ int main(int argc, char const *argv[])
                     SetConsoleCursorPosition(hConsole, coordScreen);
 
                     char out[81920] = "";
-                    char box_0[3] = "??";
-                    char box_1[3] = "??";
+                    char box_0[3] = "¡õ";
+                    char box_1[3] = "¡ö";
 
                     out[0] = '\0';
                     int up1 = std::accumulate(ai1.recv_attack.begin(), ai1.recv_attack.end(), 0);
